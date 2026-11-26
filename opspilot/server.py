@@ -2,6 +2,7 @@
 import hmac
 import json
 import re
+import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -13,6 +14,7 @@ from .store import Conflict, NotFound
 DASHBOARD = Path(__file__).parent / "web" / "index.html"
 LOCAL = {"127.0.0.1", "localhost", "::1"}
 MAX_BODY = 32_000
+DRAIN_LIMIT = 1_000_000
 
 
 def make_server(service: Service, settings: Settings, host="127.0.0.1", port=8000) -> ThreadingHTTPServer:
@@ -45,10 +47,9 @@ def make_server(service: Service, settings: Settings, host="127.0.0.1", port=800
             # Requiring JSON stops plain cross-site form posts.
             if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json":
                 raise ValueError("Content-Type must be application/json")
-            length = int(self.headers.get("Content-Length") or 0)
-            if not 0 < length <= MAX_BODY:
+            if not self.raw:
                 raise ValueError("request body is empty or too large")
-            data = json.loads(self.rfile.read(length))
+            data = json.loads(self.raw)
             if not isinstance(data, dict):
                 raise ValueError("request body must be a JSON object")
             return data
@@ -93,7 +94,6 @@ def make_server(service: Service, settings: Settings, host="127.0.0.1", port=800
                 self._send(400, {"error": str(e)})
             except Exception:
                 self.log_error("unhandled error on %s", path)
-                import traceback
                 traceback.print_exc()
                 self._send(500, {"error": "internal error"})
 
@@ -101,6 +101,14 @@ def make_server(service: Service, settings: Settings, host="127.0.0.1", port=800
             self._handle("GET")
 
         def do_POST(self):
+            # Read the body before any reply. Closing a socket with unread data
+            # resets the connection on Linux, and the client never sees the error.
+            try:
+                length = max(int(self.headers.get("Content-Length") or 0), 0)
+            except ValueError:
+                length = 0
+            body = self.rfile.read(min(length, DRAIN_LIMIT))
+            self.raw = body if length <= MAX_BODY else b""
             self._handle("POST")
 
     return ThreadingHTTPServer((host, port), Handler)
