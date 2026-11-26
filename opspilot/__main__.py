@@ -27,11 +27,12 @@ def main(argv=None) -> int:
     ev = commands.add_parser("eval", help="score the pipeline")
     ev.add_argument("--split", choices=["dev", "test", "all"], default="test")
     ev.add_argument("--check", action="store_true", help="exit with an error if below the minimum scores")
+    ev.add_argument("--pace", type=float, default=0, help="seconds to wait between messages")
     commands.add_parser("mcp", help="run the MCP server over stdio")
     args = parser.parse_args(argv)
 
     if args.command == "eval":
-        return evaluate.main(args.split, args.check)
+        return evaluate.main(args.split, args.check, args.pace)
     settings = Settings.from_env()
     if args.command == "mcp":
         mcp_server.run(settings)

@@ -4,6 +4,7 @@
     python -m opspilot eval --split dev     # the split you may tune against
 """
 import json
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -26,11 +27,12 @@ def ratio(hits: list[bool]) -> float | None:
     return round(sum(hits) / len(hits), 3) if hits else None
 
 
-def evaluate(pipeline: Pipeline, cases: list[dict]) -> dict:
+def evaluate(pipeline: Pipeline, cases: list[dict], pace: float = 0) -> dict:
     scores = {k: [] for k in ("intent_accuracy", "field_accuracy", "retrieval_hit_rate",
                               "escalation_recall", "escalation_precision", "injection_recall")}
     failures, latencies, cost, fallbacks = [], [], 0.0, 0
     for case in cases:
+        time.sleep(pace)  # stays inside a free tier's per-minute limit
         result = pipeline.run(case["message"])
         latencies.append(result["metrics"]["latency_ms"])
         cost += result["metrics"]["cost_usd"]
@@ -89,9 +91,9 @@ def baseline(settings: Settings) -> dict:
     return {"gates": GATES, "splits": {split: evaluate(pipeline, load(split)) for split in ("dev", "test")}}
 
 
-def main(split: str = "test", check: bool = False) -> int:
+def main(split: str = "test", check: bool = False, pace: float = 0) -> int:
     settings = Settings.from_env()
-    report = evaluate(Pipeline(settings), load(split))
+    report = evaluate(Pipeline(settings), load(split), pace)
     report = {"provider": settings.provider, "model": settings.model or "rules", "split": split, **report}
     print(json.dumps(report, indent=2))
     problems = gate(report) if check else []
