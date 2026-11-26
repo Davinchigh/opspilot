@@ -41,6 +41,21 @@ class RulesAndGuardrails(unittest.TestCase):
         self.assertEqual(masked, "Call [phone] or mail [email] about 2 cakes")
 
 
+class Quantities(unittest.TestCase):
+    def test_article_in_a_question_is_not_a_quantity(self):
+        self.assertIsNone(rules.triage("How much is an 8 inch celebration cake?")["quantity"])
+        self.assertEqual(rules.triage("I'd love a chocolate cake on Sunday")["quantity"], 1)
+
+
+class Drafts(Base):
+    def test_order_reply_states_only_the_relevant_price_and_fee(self):
+        result = Pipeline(self.settings).run("I would like 2 boxes of cupcakes for Friday, delivery to Osu")
+        self.assertIn("A box of 6 cupcakes costs GHS 60.", result["draft"])
+        self.assertIn("Osu for GHS 35", result["draft"])
+        self.assertNotIn("doughnuts", result["draft"])
+        self.assertEqual(result["flags"], [])
+
+
 class PipelineBehaviour(Base):
     def test_normal_order_waits_for_approval(self):
         result = Pipeline(self.settings).run(ORDER)
@@ -116,7 +131,7 @@ class Workflow(Base):
         self.assertEqual(service.store.outbox(), [])
 
 
-class Api(Base):
+class ServerCase(Base):
     def start(self, settings):
         server = make_server(Service(settings), settings, port=0)
         threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -134,6 +149,8 @@ class Api(Base):
             with e:
                 return e.code, json.load(e)
 
+
+class Api(ServerCase):
     def test_full_flow(self):
         self.start(self.settings)
         status, ticket = self.call("/api/messages", {"message": ORDER, "sender": "ama"})
@@ -142,6 +159,7 @@ class Api(Base):
         self.assertEqual(self.call(path, {"decision": "approve", "reviewer": ""})[0], 400)
         self.assertEqual(self.call(path, {"decision": "approve", "reviewer": "M"})[0], 200)
         self.assertEqual(self.call(path, {"decision": "approve", "reviewer": "M"})[0], 409)
+        self.assertEqual(self.call("/api/state")[1]["stats"]["by_status"], {"sent": 1})
         self.assertEqual(self.call("/api/tickets/999")[0], 404)
 
     def test_rejects_bad_input_and_foreign_hosts(self):
@@ -158,6 +176,35 @@ class Api(Base):
     def test_public_bind_needs_token(self):
         with self.assertRaises(ValueError):
             make_server(Service(self.settings), self.settings, host="0.0.0.0", port=0)
+
+
+class Safety(ServerCase):
+    def test_escalated_ticket_needs_acknowledgement(self):
+        self.start(self.settings)
+        ticket = self.call("/api/messages", {"message": "My cake arrived smashed"})[1]
+        path = f"/api/tickets/{ticket['id']}/decision"
+        body = {"decision": "approve", "reviewer": "M"}
+        self.assertEqual(self.call(path, body)[0], 400)
+        self.assertEqual(self.call(path, {**body, "acknowledged": True})[0], 200)
+
+    def test_demo_keeps_visitors_apart_and_limits_them(self):
+        self.start(replace(self.settings, demo=True, max_tickets=2, rate_per_minute=5))
+        mine, theirs = {"X-Workspace": "a" * 32}, {"X-Workspace": "b" * 32}
+        self.assertEqual(self.call("/api/state")[0], 400)
+        ticket = self.call("/api/messages", {"message": ORDER}, mine)[1]
+        self.assertEqual(self.call("/api/state", headers=theirs)[1]["tickets"], [])
+        self.assertEqual(self.call(f"/api/tickets/{ticket['id']}", headers=theirs)[0], 404)
+        decision = {"decision": "approve", "reviewer": "M"}
+        self.assertEqual(self.call(f"/api/tickets/{ticket['id']}/decision", decision, theirs)[0], 404)
+        self.assertEqual(self.call("/api/messages", {"message": ORDER}, mine)[0], 201)
+        self.assertEqual(self.call("/api/messages", {"message": ORDER}, mine)[0], 409)
+        self.assertEqual(self.call("/api/reset", {"confirm": True}, mine)[0], 200)
+        self.assertEqual(self.call("/api/messages", {"message": ORDER}, mine)[0], 429)
+
+    def test_audit_export_neutralises_formulas(self):
+        service = Service(self.settings)
+        service.submit(ORDER, "=HYPERLINK(1)")
+        self.assertIn("'=HYPERLINK(1)", service.store.audit_csv())
 
 
 class Mcp(Base):

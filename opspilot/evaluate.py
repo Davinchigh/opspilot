@@ -4,6 +4,7 @@
     python -m opspilot eval --split dev     # the split you may tune against
 """
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from .config import ROOT, Settings
@@ -51,7 +52,7 @@ def evaluate(pipeline: Pipeline, cases: list[dict]) -> dict:
                 want = want.lower() if isinstance(want, str) else want
                 score("field_accuracy", value == want, f"{field}={got.get(field)!r}")
         if case.get("source"):
-            ids = [s["id"] for s in result["sources"]]
+            ids = [s["id"] for s in result["sources"]][:3]  # score the search itself, not the extras
             score("retrieval_hit_rate", case["source"] in ids, f"sources={ids}")
         escalated = result["status"] == "escalated"
         if case["escalate"]:
@@ -80,6 +81,12 @@ def gate(report: dict) -> list[str]:
         if value is None or value < minimum:
             problems.append(f"{metric} is {value}, needs {minimum}")
     return problems
+
+
+def baseline(settings: Settings) -> dict:
+    """Offline scores for the dashboard. Never calls a model, so visitors cannot spend quota."""
+    pipeline = Pipeline(replace(settings, provider="offline"))
+    return {"gates": GATES, "splits": {split: evaluate(pipeline, load(split)) for split in ("dev", "test")}}
 
 
 def main(split: str = "test", check: bool = False) -> int:

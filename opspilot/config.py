@@ -25,14 +25,25 @@ class Settings:
     model: str = ""
     price_in: float = 0.0  # USD per 1M input tokens
     price_out: float = 0.0  # USD per 1M output tokens
-    db_path: str = str(ROOT / "opspilot.db")
+    db_path: str = str(ROOT / "opspilot-v2.db")
     knowledge_dir: str = str(ROOT / "knowledge")
     token: str = ""  # required when the server is not bound to localhost
+    database_url: str = ""  # Postgres, for hosting; empty means SQLite
+    demo: bool = False  # public demo: no token, a private workspace per visitor
+    max_tickets: int = 0  # per workspace; 0 means no limit
+    max_total: int = 0  # all workspaces together; 0 means no limit
+    rate_per_minute: int = 0  # write requests per address; 0 means no limit
+    ttl_hours: int = 0  # delete tickets older than this; 0 means keep
 
     @classmethod
     def from_env(cls) -> "Settings":
         load_dotenv()
         env, d = os.environ.get, cls()
+        demo = env("OPSPILOT_DEMO") == "1"
+
+        def number(key, if_demo):
+            return int(env(key) or (if_demo if demo else 0))
+
         return cls(
             provider=env("OPSPILOT_PROVIDER") or d.provider,
             base_url=env("OPSPILOT_BASE_URL", ""),
@@ -43,4 +54,11 @@ class Settings:
             db_path=env("OPSPILOT_DB") or d.db_path,
             knowledge_dir=env("OPSPILOT_KNOWLEDGE") or d.knowledge_dir,
             token=env("OPSPILOT_TOKEN", ""),
+            # DATABASE_URL is a common name, so it is only used when asked for.
+            database_url=env("DATABASE_URL", "") if demo or env("OPSPILOT_USE_DATABASE_URL") == "1" else "",
+            demo=demo,
+            max_tickets=number("OPSPILOT_MAX_TICKETS", 60),
+            max_total=number("OPSPILOT_MAX_TOTAL", 5000),
+            rate_per_minute=number("OPSPILOT_RATE_PER_MINUTE", 40),
+            ttl_hours=number("OPSPILOT_TTL_HOURS", 24),
         )

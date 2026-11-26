@@ -9,7 +9,7 @@ import sys
 from . import __version__
 from .config import Settings
 from .service import Service
-from .store import NotFound
+from .store import Conflict, NotFound
 
 PROTOCOL = "2025-06-18"
 TEXT = {"type": "string"}
@@ -68,7 +68,7 @@ def handle(service: Service, request: dict) -> dict | None:
         try:
             value = call_tool(service, params.get("name"), params.get("arguments") or {})
             return ok({"content": [{"type": "text", "text": json.dumps(value)}], "isError": False})
-        except (ValueError, NotFound) as e:
+        except (ValueError, NotFound, Conflict) as e:
             return ok({"content": [{"type": "text", "text": str(e)}], "isError": True})
         except Exception as e:  # keep the server alive; details go to stderr
             print(f"tool error: {e!r}", file=sys.stderr)

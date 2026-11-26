@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpsPilot — AI drafts, people decide</title>
+<meta name="description" content="An AI operations desk: customer messages are triaged, answered from company documents, safety checked and approved by a person.">
+<meta name="theme-color" content="#010805">
+<meta property="og:title" content="OpsPilot">
+<meta property="og:description" content="AI drafts the reply. A person decides what gets sent.">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/app.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+  <a class="brand" href="#desk">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 22C5 12 12 5 22 5h5v5c0 10-7 17-17 17H5z"/><path d="M9 23 22 10"/></svg>
+    <span>OpsPilot</span>
+  </a>
+  <nav aria-label="Views">
+    <a href="#desk">Desk</a>
+    <a href="#activity">Activity</a>
+    <a href="#knowledge">Knowledge</a>
+    <a href="#scores">Scores</a>
+  </nav>
+  <div class="top-end">
+    <span class="engine" id="engine">Connecting</span>
+    <a class="quiet" href="https://github.com/Davinchigh/opspilot" target="_blank" rel="noopener">Source</a>
+  </div>
+</header>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<main id="main">
+  <section id="view-desk" class="view">
+    <div class="headline">
+      <h1 id="summary">Opening your desk</h1>
+      <p id="subsummary">AI drafts the reply. A person decides what gets sent.</p>
+    </div>
+    <div class="desk" id="desk">
+      <aside class="queue" aria-label="Messages">
+        <button class="primary wide" id="new">New customer message <kbd>N</kbd></button>
+        <div class="filters" id="filters" role="group" aria-label="Filter messages"></div>
+        <input type="search" id="find" placeholder="Search messages  /" aria-label="Search messages">
+        <ul id="list"></ul>
+        <div class="queue-foot">
+          <button class="quiet" id="reset">Clear all messages</button>
+        </div>
+      </aside>
+      <section class="stage" id="stage" aria-live="polite"></section>
+      <aside class="path" id="path" aria-label="How this reply was decided"></aside>
+    </div>
+  </section>
+
+  <section id="view-activity" class="view page" hidden>
+    <div class="headline"><h1>Every decision, on record</h1><p>Who did what, and when. Entries are added, never edited.</p></div>
+    <button class="ghost" id="export">Download as CSV</button>
+    <ol class="log" id="log"></ol>
+  </section>
+
+  <section id="view-knowledge" class="view page" hidden>
+    <div class="headline"><h1>What the drafts are allowed to know</h1><p>Replies may only use these documents. Prices that are not in them get flagged.</p></div>
+    <input type="search" id="ask" placeholder="Try: delivery to Tema" aria-label="Search company documents">
+    <div class="docs" id="docs"></div>
+  </section>
+
+  <section id="view-scores" class="view page" hidden>
+    <div class="headline"><h1>How well the baseline does</h1><p>Scored live against labelled messages. The same minimum scores block a release in CI.</p></div>
+    <div id="scores"></div>
+  </section>
+</main>
+<noscript><p class="noscript">OpsPilot needs JavaScript to show the desk.</p></noscript>
+</body>
+</html>

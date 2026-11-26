@@ -5,6 +5,8 @@ with no account, and the fallback when a model call fails or returns invalid out
 """
 import re
 
+from .retrieval import tokenize
+
 PRODUCTS = {
     "cake": r"\bcakes?\b",
     "cupcake": r"\bcup ?cakes?\b",
@@ -78,30 +80,72 @@ def extract(text: str) -> dict:
 
 def triage(text: str) -> dict:
     intent, confidence = classify(text)
-    return {"intent": intent, "urgency": urgency(text, intent), "confidence": confidence, **extract(text)}
+    fields = extract(text)
+    # "How much is a cake?" names a product, not a number wanted.
+    if intent != "order" and fields["quantity"] == 1 and not re.search(r"\b(?:1|one)\b", text.lower()):
+        fields["quantity"] = None
+    return {"intent": intent, "urgency": urgency(text, intent), "confidence": confidence, **fields}
 
 
-def draft(result: dict, sources: list) -> dict:
+def sentences(text: str) -> list[str]:
+    return [part.strip() for part in re.split(r"(?<=[.!?])\s+", " ".join(text.split())) if part.strip()]
+
+
+def best_facts(message: str, chunk, limit: int = 2) -> list[str]:
+    """The sentences of one document section that share the most words with the message."""
+    wanted = set(tokenize(message))
+    parts = sentences(chunk.text)
+    scored = sorted(range(len(parts)), key=lambda i: (-len(wanted & set(tokenize(parts[i]))), i))
+    keep = [i for i in scored[:limit] if wanted & set(tokenize(parts[i]))] or [0]
+    return [parts[i] for i in sorted(keep)]
+
+
+def order_facts(result: dict, sources: list) -> tuple[list[str], list[str]]:
+    """Only the price of what was asked for and the fee for where it is going."""
+    facts, cited = [], []
+    wanted = [(result.get("product"), r"\bcosts?\b|\bstarts at\b"), (result.get("area"), r"\bdeliver")]
+    for term, must in wanted:
+        if not term:
+            continue
+        name = re.compile(PRODUCTS.get(term, rf"\b{re.escape(term)}\b"), re.I)
+        for chunk, _ in sources:
+            found = [s for s in sentences(chunk.text) if name.search(s) and re.search(must, s, re.I)]
+            if found:
+                facts += found[:2]
+                cited.append(chunk.id)
+                break
+    return facts, list(dict.fromkeys(cited))
+
+
+def draft(message: str, result: dict, sources: list) -> dict:
     intent = result["intent"]
-    cited, facts = [], ""
-    if sources:
-        chunk = sources[0][0]
-        cited, facts = [chunk.id], " ".join(chunk.text.split())
+    cited: list[str] = []
     if intent == "complaint":
-        body = ("I am sorry about this. Please send a photo of the order and your order name. "
+        body = ("I am sorry about this. Please send a photo of the order and the name it was booked under. "
                 "A manager will review it and get back to you.")
-        cited = []
     elif intent == "cancellation":
-        body = f"We have received your cancellation request. A team member will confirm it. {facts}"
+        policy = next((c for c, _ in sources if c.id.endswith("#cancellation")), None)
+        body = "We have received your cancellation request and a team member will confirm it."
+        if policy:
+            body += "\n\n" + " ".join(sentences(policy.text))
+            cited = [policy.id]
     elif intent == "order":
-        wanted = " ".join(str(v) for v in (result.get("quantity"), result.get("product")) if v) or "your order"
-        missing = [label for key, label in (("date", "date needed"), ("area", "delivery area or pickup"))
-                   if not result.get(key)]
-        ask = f" Please confirm the {' and '.join(missing)}." if missing else ""
-        body = f"Thank you. We noted your request ({wanted}).{ask} {facts}"
-    elif intent == "question" and facts:
-        body = facts
+        facts, cited = order_facts(result, sources)
+        what = result.get("product")
+        noted = "your order"
+        if what:
+            noted = f"your order ({what}, quantity {result['quantity']})" if result.get("quantity") else f"your {what} order"
+        body = f"Thank you, we have noted {noted}."
+        if facts:
+            body += "\n\n" + " ".join(facts)
+        missing = [label for key, label in (("date", "the date you need it"),
+                                            ("area", "whether you want delivery or pickup")) if not result.get(key)]
+        if missing:
+            body += f"\n\nPlease tell us {' and '.join(missing)}."
+        body += "\n\nWe will confirm availability shortly."
+    elif intent == "question" and sources:
+        chunk = sources[0][0]
+        body, cited = " ".join(best_facts(message, chunk)), [chunk.id]
     else:
         body = "Thank you for your message. A team member will reply shortly."
-        cited = []
-    return {"reply": f"Hello, {body.strip()}\nSweet Crumb Bakery", "citations": cited}
+    return {"reply": f"Hello,\n\n{body}\n\nSweet Crumb Bakery", "citations": cited}

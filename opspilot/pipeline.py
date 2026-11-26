@@ -64,6 +64,17 @@ class Pipeline:
             client = ChatClient(settings)
         self.client = client
 
+    def _retrieve(self, message: str, triage: dict) -> list:
+        found = self.index.search(message)
+        # An order also needs the price and delivery fee, which the wording may not point to.
+        if triage["intent"] == "order":
+            for query in (triage.get("product") and f"{triage['product']} costs price",
+                          triage.get("area") and f"delivery fee {triage['area']}"):
+                for chunk, score in self.index.search(query, 1) if query else []:
+                    if chunk.id not in {c.id for c, _ in found}:
+                        found.append((chunk, score))
+        return found
+
     def run(self, message: str) -> dict:
         started, trace = time.perf_counter(), []
         usage = {"calls": 0, "input_tokens": 0, "output_tokens": 0}
@@ -88,11 +99,11 @@ class Pipeline:
 
         result = step("triage", lambda: model_or_rules(
             "triage", TRIAGE_PROMPT, safe, validate_triage, lambda: rules.triage(message)))
-        sources = step("retrieve", lambda: self.index.search(message))
+        sources = step("retrieve", lambda: self._retrieve(message, result))
         context = "\n".join(f"[{c.id}] {c.text}" for c, _ in sources) or "(none)"
         user = f"SOURCES:\n{context}\n\nTRIAGE: {json.dumps(result)}\n\nCUSTOMER MESSAGE:\n{safe}"
         written = step("draft", lambda: model_or_rules(
-            "draft", DRAFT_PROMPT, user, validate_draft, lambda: rules.draft(result, sources)))
+            "draft", DRAFT_PROMPT, user, validate_draft, lambda: rules.draft(message, result, sources)))
         flags = step("guardrails", lambda: guardrails.check(
             message, result, written["reply"], written["citations"], sources))
         if fallback:

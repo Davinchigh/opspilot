@@ -1,0 +1,2 @@
+# Only needed when hosting with Postgres. Running locally needs no packages.
+psycopg[binary]>=3.2,<4
