@@ -35,7 +35,7 @@ def call_tool(service: Service, name: str, args: dict):
         return service.submit(args.get("message"), args.get("sender", "mcp"), "mcp")
     if name == "list_open_tickets":
         return [{"id": t["id"], "status": t["status"], "message": t["message"],
-                 "flags": t["result"]["flags"]} for t in service.store.list("open")]
+                 "flags": t["result"]["flags"]} for t in service.store.list_tickets("open")]
     if name == "get_ticket":
         if not isinstance(args.get("ticket_id"), int):
             raise ValueError("ticket_id must be an integer")

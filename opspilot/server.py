@@ -67,7 +67,7 @@ def make_server(service: Service, settings: Settings, host="127.0.0.1", port=800
                 ticket = re.fullmatch(r"/api/tickets/(\d{1,12})(/decision)?", path)
                 if method == "GET":
                     if path == "/api/tickets":
-                        return self._send(200, service.store.list(query.get("status", [None])[0]))
+                        return self._send(200, service.store.list_tickets(query.get("status", [None])[0]))
                     if path == "/api/stats":
                         return self._send(200, service.store.stats())
                     if path == "/api/outbox":

@@ -88,7 +88,7 @@ class Store:
                                 "WHERE ticket_id=? ORDER BY id", (ticket_id,)).fetchall()
         return {**self._ticket(row), "events": [dict(e) for e in events]}
 
-    def list(self, status: str | None = None, limit: int = 100) -> list[dict]:
+    def list_tickets(self, status: str | None = None, limit: int = 100) -> list[dict]:
         query, args = "SELECT * FROM tickets", []
         if status == "open":
             query, args = query + " WHERE status IN (?,?)", list(OPEN)
@@ -128,7 +128,7 @@ class Store:
             return [dict(r) for r in db.execute("SELECT * FROM outbox ORDER BY id DESC LIMIT 100")]
 
     def stats(self) -> dict:
-        tickets = self.list(limit=10_000)
+        tickets = self.list_tickets(limit=10_000)
         by_status, by_intent = {}, {}
         for t in tickets:
             by_status[t["status"]] = by_status.get(t["status"], 0) + 1
