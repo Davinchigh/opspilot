@@ -8,6 +8,8 @@ edits or rejects it. Nothing is sent automatically.
 
 Demo business: Sweet Crumb Bakery (fictional). Python standard library only. Runs free, with no API key.
 
+![Review dashboard with sample messages](docs/dashboard.jpg)
+
 ## Run it
 
 Needs Python 3.11 or newer. Nothing to install.
