@@ -15,4 +15,8 @@ from opspilot.service import Service  # noqa: E402
 settings = Settings.from_env()
 if not settings.database_url:
     raise RuntimeError("DATABASE_URL is required when hosted")
-handler = make_handler(Service(settings), settings)
+Base = make_handler(Service(settings), settings)
+
+
+class handler(Base):  # Vercel looks for a top-level class with this name
+    pass
