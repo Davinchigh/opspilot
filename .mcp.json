@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "opspilot": { "command": "python", "args": ["-m", "opspilot", "mcp"] }
+  }
+}

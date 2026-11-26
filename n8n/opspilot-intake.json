@@ -1,0 +1,32 @@
+{
+  "id": "opspilotIntake01",
+  "name": "OpsPilot intake",
+  "active": false,
+  "settings": {"executionOrder": "v1"},
+  "connections": {
+    "Webhook": {"main": [[{"node": "Send to OpsPilot", "type": "main", "index": 0}]]},
+    "Send to OpsPilot": {"main": [[{"node": "Needs close review?", "type": "main", "index": 0}]]},
+    "Needs close review?": {"main": [
+      [{"node": "Alert: escalated", "type": "main", "index": 0}],
+      [{"node": "Queued for approval", "type": "main", "index": 0}]
+    ]}
+  },
+  "nodes": [
+    {"id": "a1", "name": "Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [0, 0], "webhookId": "opspilot-intake",
+     "parameters": {"httpMethod": "POST", "path": "opspilot-intake", "responseMode": "lastNode"}},
+    {"id": "a2", "name": "Send to OpsPilot", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [240, 0],
+     "retryOnFail": true, "maxTries": 3, "waitBetweenTries": 2000,
+     "parameters": {"method": "POST", "url": "http://127.0.0.1:8000/api/messages", "sendBody": true, "specifyBody": "json",
+       "jsonBody": "={{ JSON.stringify({ message: $json.body.message, sender: $json.body.sender || 'webhook', channel: 'n8n', external_id: $json.body.id ? String($json.body.id) : null }) }}",
+       "options": {}}},
+    {"id": "a3", "name": "Needs close review?", "type": "n8n-nodes-base.if", "typeVersion": 2, "position": [480, 0],
+     "parameters": {"conditions": {"options": {"caseSensitive": true, "leftValue": "", "typeValidation": "strict"}, "combinator": "and",
+       "conditions": [{"id": "c1", "leftValue": "={{ $json.status }}", "rightValue": "escalated", "operator": {"type": "string", "operation": "equals"}}]}, "options": {}}},
+    {"id": "a4", "name": "Alert: escalated", "type": "n8n-nodes-base.set", "typeVersion": 3.4, "position": [720, -100],
+     "parameters": {"assignments": {"assignments": [
+       {"id": "s1", "name": "notice", "type": "string", "value": "=Ticket {{ $json.id }} needs a manager: {{ $json.result.flags.join(', ') }}"}]}, "options": {}}},
+    {"id": "a5", "name": "Queued for approval", "type": "n8n-nodes-base.set", "typeVersion": 3.4, "position": [720, 100],
+     "parameters": {"assignments": {"assignments": [
+       {"id": "s2", "name": "notice", "type": "string", "value": "=Ticket {{ $json.id }} is waiting for approval"}]}, "options": {}}}
+  ]
+}

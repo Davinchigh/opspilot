@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpsPilot</title>
+<style>
+:root{--bg:#f4f6f5;--card:#fff;--ink:#14211d;--dim:#5b6b65;--line:#dbe3e0;--accent:#0b6e55;--warn:#a33a12;--warnbg:#fdeee7}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1513;--card:#18211e;--ink:#e8efec;--dim:#9db0a9;--line:#2a3833;--accent:#4fd0ab;--warn:#ffa57d;--warnbg:#33201a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,sans-serif}
+main{max-width:960px;margin:0 auto;padding:24px 16px 64px}
+h1{margin:0;font-size:24px}h2{font-size:17px;margin:28px 0 10px}
+.sub{color:var(--dim);margin:2px 0 20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:12px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.stats .card{margin:0}.stats b{display:block;font-size:22px}
+.stats span,.meta,small{color:var(--dim);font-size:13px}
+label{display:block;font-size:13px;color:var(--dim);margin-bottom:4px}
+input,textarea{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--ink);font:inherit}
+textarea{min-height:84px;resize:vertical}
+button{font:inherit;font-weight:600;padding:9px 16px;border-radius:7px;border:1px solid var(--accent);background:var(--accent);color:var(--card);cursor:pointer}
+button.ghost{background:transparent;color:var(--ink);border-color:var(--line)}
+button:disabled{opacity:.5;cursor:wait}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;align-items:center}
+.tag{display:inline-block;font-size:12px;border:1px solid var(--line);border-radius:99px;padding:1px 9px;margin-right:6px}
+.tag.flag{background:var(--warnbg);color:var(--warn);border-color:transparent}
+blockquote{margin:10px 0;padding-left:12px;border-left:3px solid var(--line);white-space:pre-wrap;overflow-wrap:anywhere}
+details{margin-top:8px}summary{cursor:pointer;color:var(--dim)}
+#error{background:var(--warnbg);color:var(--warn);padding:10px 14px;border-radius:7px;margin-bottom:12px}
+#error:empty{display:none}
+</style>
+</head>
+<body>
+<main>
+  <h1>OpsPilot</h1>
+  <p class="sub">AI drafts the reply. A person decides what gets sent.</p>
+  <div id="error" role="alert"></div>
+  <section class="stats" id="stats" aria-label="Summary"></section>
+
+  <h2>New customer message</h2>
+  <form class="card" id="intake">
+    <label for="message">Message</label>
+    <textarea id="message" required maxlength="4000" placeholder="I would like 12 doughnuts for tomorrow, delivery to Madina"></textarea>
+    <div class="row"><button>Process message</button></div>
+  </form>
+
+  <h2>Waiting for review</h2>
+  <div class="card">
+    <label for="reviewer">Your name (recorded in the audit log)</label>
+    <input id="reviewer" maxlength="100" autocomplete="name">
+  </div>
+  <div id="queue"></div>
+
+  <h2>Sent (simulated outbox)</h2>
+  <div id="outbox"></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+// textContent only: customer text is never parsed as HTML.
+function el(tag, props = {}, ...children) {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children);
+  return node;
+}
+let token = sessionStorage.getItem('opspilot-token') || '';
+async function api(path, body, retried) {
+  const headers = {};
+  if (token) headers.Authorization = 'Bearer ' + token;
+  if (body) headers['Content-Type'] = 'application/json';
+  const res = await fetch(path, body ? {method: 'POST', headers, body: JSON.stringify(body)} : {headers});
+  if (res.status === 401 && !retried) {
+    token = prompt('Access token') || '';
+    sessionStorage.setItem('opspilot-token', token);
+    return api(path, body, true);
+  }
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+async function guarded(button, work) {
+  $('error').textContent = '';
+  if (button) button.disabled = true;
+  try { await work(); }
+  catch (e) { $('error').textContent = e.message; }
+  finally { if (button) button.disabled = false; }
+}
+const drafts = new Map();  // keeps unsaved edits across refreshes
+function ticketCard(t) {
+  const r = t.result, tri = r.triage;
+  const reply = el('textarea', {value: drafts.get(t.id) ?? r.draft, maxLength: 4000});
+  reply.setAttribute('aria-label', 'Reply to ticket ' + t.id);
+  reply.addEventListener('input', () => drafts.set(t.id, reply.value));
+  const decide = decision => event => guarded(event.target, async () => {
+    const reviewer = $('reviewer').value.trim();
+    if (!reviewer) { $('reviewer').focus(); throw new Error('Enter your name before approving or rejecting.'); }
+    await api(`/api/tickets/${t.id}/decision`, {decision, reviewer, reply: reply.value});
+    drafts.delete(t.id);
+    await refresh();
+  });
+  const fields = ['product', 'quantity', 'date', 'area'].filter(k => tri[k] != null).map(k => `${k}: ${tri[k]}`);
+  return el('article', {className: 'card'},
+    el('div', {},
+      el('span', {className: 'tag', textContent: `#${t.id} ${tri.intent}`}),
+      el('span', {className: 'tag', textContent: `${tri.urgency} urgency`}),
+      ...r.flags.map(f => el('span', {className: 'tag flag', textContent: f.replaceAll('_', ' ')}))),
+    el('blockquote', {textContent: t.message}),
+    el('div', {className: 'meta', textContent: `From ${t.sender} via ${t.channel}` + (fields.length ? ' · ' + fields.join(' · ') : '')}),
+    el('label', {textContent: 'Draft reply (edit before approving)'}), reply,
+    el('details', {}, el('summary', {textContent: `Sources and trace (${r.metrics.latency_ms} ms, $${r.metrics.cost_usd})`}),
+      ...r.sources.map(s => el('p', {}, el('small', {textContent: (r.citations.includes(s.id) ? 'Cited · ' : '') + s.id}), el('br'), s.text)),
+      el('small', {textContent: r.trace.map(s => s.error ? `${s.step}: ${s.error}` : `${s.step} ${s.ms} ms`).join(' → ')})),
+    el('div', {className: 'row'},
+      el('button', {textContent: 'Approve and send', onclick: decide('approve')}),
+      el('button', {textContent: 'Reject', className: 'ghost', onclick: decide('reject')})));
+}
+async function refresh() {
+  const [stats, open, outbox] = await Promise.all([api('/api/stats'), api('/api/tickets?status=open'), api('/api/outbox')]);
+  const rate = stats.approved_unedited_rate;
+  $('stats').replaceChildren(...[
+    [stats.tickets, 'messages processed'], [open.length, 'waiting for review'],
+    [stats.by_status.escalated || 0, 'escalated'], [rate == null ? '–' : Math.round(rate * 100) + '%', 'approved without edits'],
+    ['$' + stats.model_cost_usd, 'model cost']
+  ].map(([value, label]) => el('div', {className: 'card'}, el('b', {textContent: value}), el('span', {textContent: label}))));
+  // Escalated tickets first.
+  open.sort((a, b) => (b.status === 'escalated') - (a.status === 'escalated') || a.id - b.id);
+  $('queue').replaceChildren(...(open.length ? open.map(ticketCard)
+    : [el('p', {className: 'meta', textContent: 'Nothing is waiting. Process a message above.'})]));
+  $('outbox').replaceChildren(...(outbox.length ? outbox.map(m => el('div', {className: 'card'},
+    el('small', {textContent: `Ticket #${m.ticket_id} to ${m.recipient}`}), el('blockquote', {textContent: m.body})))
+    : [el('p', {className: 'meta', textContent: 'Approved replies appear here.'})]));
+}
+$('intake').addEventListener('submit', event => {
+  event.preventDefault();
+  guarded(event.submitter, async () => {
+    await api('/api/messages', {message: $('message').value, sender: 'dashboard', channel: 'web'});
+    $('message').value = '';
+    await refresh();
+  });
+});
+$('reviewer').value = localStorage.getItem('opspilot-reviewer') || '';
+$('reviewer').addEventListener('change', () => localStorage.setItem('opspilot-reviewer', $('reviewer').value));
+guarded(null, refresh);
+</script>
+</body>
+</html>
